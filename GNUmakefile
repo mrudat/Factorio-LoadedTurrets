@@ -75,7 +75,7 @@ install: package-copy
 
 .PHONY: tag
 tag:
-	$(git) tag -f $(VERSION_STRING)
+	$(GIT) tag -f $(VERSION_STRING)
 
 $(OUTPUT_DIR)/%.png: %.png
 	cp $< $@
