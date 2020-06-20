@@ -6,11 +6,14 @@ local ornodes = require("__OR-Nodes__/library").init()
 local locale_of = rusty_locale.of
 local icons_of = rusty_icons.of
 local depend_on_all_recipe_ingredients = ornodes.depend_on_all_recipe_ingredients
+local depend_on_item = ornodes.depend_on_item
 
 local MOD_NAME = 'LoadedTurrets'
 local PREFIX = MOD_NAME .. '-'
 local FLUID_PER_BARREL = 50
 local ENERGY_PER_EMPTY = 0.2
+
+local HAVE_UNITURRET = mods['uniturret']
 
 local function autovivify(table, key)
   local foo = table[key]
@@ -21,8 +24,18 @@ local function autovivify(table, key)
   return foo
 end
 
-local function add_to_technology(recipe)
-  local technologies = depend_on_all_recipe_ingredients(recipe)
+local function add_to_technology(recipe, turret_item_name, ammo_name, ammo_type)
+  local technologies = depend_on_all_recipe_ingredients(recipe, true)
+  if not technologies then
+    log(string.format("Couldn't determine technology to unlock filling %s with %s, so going with a best-effort guess.", turret_item_name, ammo_name))
+    log("Trying to add recipe to technology for " .. turret_item_name)
+    technologies = depend_on_item(turret_item_name, 'item', true)
+    if not technologies or #technologies == 0 then
+      log("Trying to add recipe to technology for " .. ammo_name)
+      technologies = depend_on_item(ammo_name, ammo_type, true)
+      if not technologies then return end
+    end
+  end
 
   -- recipe can be unlocked from the start.
   if #technologies == 0 then return end
@@ -74,7 +87,7 @@ function create_group(new_things)
       icon_size = 128
     }
   )
-  create_group = function() return filled_turret_name end
+  create_group = function(_) return filled_turret_name end
   return create_group(new_things)
 end
 
@@ -198,34 +211,40 @@ local function derive_from_turret_and_ammo(
 
   create_subgroup(new_things, subgroup_name, turret.order)
 
+  -- add these to the recipes for the benefit of add_to_technology
+  local icons = util.combine_icons(
+    turret_icons,
+    ammo_icons,
+    {
+      scale = 0.5,
+      shift = {4,-8}
+    }
+  )
+
+  local localised_name  = {
+    "item-name.loaded-turret",
+    turret_locale.name,
+    ammo_locale.name
+  }
+
+  local localised_description = {
+    "item-description.loaded-turret",
+    turret_locale.name,
+    ammo_locale.name
+  }
+
   local new_item = {
     type = "item",
     name = new_item_name,
-    localised_name = {
-      "item-name.loaded-turret",
-      turret_locale.name,
-      ammo_locale.name
-    },
-    localised_description = {
-      "item-description.loaded-turret",
-      turret_locale.name,
-      ammo_locale.name
-    },
-    icons = util.combine_icons(
-      turret_icons,
-      ammo_icons,
-      {
-        scale = 0.5,
-        shift = {4,-8}
-      }
-    ),
+    localised_name = localised_name,
+    localised_description = localised_description,
+    icons = icons,
     subgroup = subgroup_name,
     order = ammo.order,
     place_result = turret_name,
     stack_size = 1
   }
   HighlyDerivative.mark_final(new_item)
-  data:extend{new_item}
   table.insert(new_things, new_item)
 
   local stack_sizes = {}
@@ -254,6 +273,9 @@ local function derive_from_turret_and_ammo(
     local new_recipe = {
       type = "recipe",
       name = recipe_name,
+      localised_name = localised_name,
+      localised_description = localised_description,
+      icons = icons,
       ingredients = {
         turret_item_ingredient,
         {
@@ -268,7 +290,7 @@ local function derive_from_turret_and_ammo(
       category = crafting_category
     }
     table.insert(new_things, new_recipe)
-    add_to_technology(new_recipe)
+    add_to_technology(new_recipe, turret_item_name, ammo_name, ammo_type)
 
     if barrel_count then
       local barrel_recipe_name = HighlyDerivative.derive_name(PREFIX, "recipe", turret_name, 'item', barrel_name, turret_item_name)
@@ -276,6 +298,9 @@ local function derive_from_turret_and_ammo(
       local barrel_recipe = {
         type = "recipe",
         name = barrel_recipe_name,
+        localised_name = localised_name,
+        localised_description = localised_description,
+        icons = icons,
         ingredients = {
           turret_item_ingredient,
           {
@@ -299,7 +324,7 @@ local function derive_from_turret_and_ammo(
         category = crafting_category
       }
       table.insert(new_things, barrel_recipe)
-      add_to_technology(barrel_recipe)
+      add_to_technology(barrel_recipe, turret_item_name, barrel_name, 'item')
     end
 
     stack_sizes[#stack_sizes+1] = math.max(
@@ -376,7 +401,12 @@ local function derive_ammo(new_things, ammo, ammo_name)
 end
 
 local function derive_ammo_turret(new_things, turret, turret_name)
-  if not HighlyDerivative.can_be_made(turret) then return end
+  if HAVE_UNITURRET and turret_name:sub(1,9) == 'uniturret' then
+    -- uniturrets can't be created directly, instead the item places a 1-stack chest, you fill that with ammo, and then the actual turret is created based on the ammo you supplied.
+    if turret_name:sub(-6) == 'locked' then return end
+  else
+    if not HighlyDerivative.can_be_made(turret) then return end
+  end
 
   local ammo_count = turret.automated_ammo_count
   if not ammo_count then return end
@@ -586,3 +616,12 @@ HighlyDerivative.register_derivation('ammo-turret', derive_ammo_turret)
 HighlyDerivative.register_derivation('artillery-turret', derive_artillery_turet)
 HighlyDerivative.register_derivation('fluid', derive_fluid)
 HighlyDerivative.register_derivation('fluid-turret', derive_fluid_turret)
+
+--[[
+
+TODO support for uniturret.
+
+The uniturret item creates a 2x2 chest with a single stack, which then gets replaced with the actual turret when filled with something.
+
+]]
+

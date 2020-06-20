@@ -10,7 +10,16 @@
             "name": "Factorio Mod Debug",
             "factorioPath": "C:\\Program Files\\Factorio\\bin\\x64\\factorio.exe",
             "preLaunchTask": "make",
-            "hookData": true
+            "hookData": true,
+            "adjustMods": {
+                "LoadedTurrets-0_18": true,
+                "Test Mod": false,
+                "LR_Turret": true,
+                "scattergun_turret": true,
+                "uniturret": true,
+                "vtk-cannon-turret": true,
+            },
+            "useInstrumentMode": true
         }
     ]
 }
