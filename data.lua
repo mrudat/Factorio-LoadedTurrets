@@ -117,6 +117,8 @@ local function derive_from_turret_and_ammo(
 
   local ammo_name = ammo.name
 
+  -- TODO build entity for the benefit of construction robots.
+
   if not turret_items then
     turret_items = HighlyDerivative.find_items_that_place(turret)
     if not next(turret_items) then
@@ -201,10 +203,10 @@ local function derive_from_turret_and_ammo(
     return
   end
 
-  local new_item_name = HighlyDerivative.derive_name(PREFIX, "turret", turret_name, ammo_type, ammo_name)
+  local new_turret_name = HighlyDerivative.derive_name(PREFIX, "turret", turret_name, ammo_type, ammo_name)
 
   if mods['debugadapter'] then
-    log("Creating " .. new_item_name)
+    log("Creating " .. new_turret_name)
   end
 
   local subgroup_name = HighlyDerivative.derive_name(PREFIX, "filled-turret", turret_name)
@@ -233,15 +235,55 @@ local function derive_from_turret_and_ammo(
     ammo_locale.name
   }
 
+  local fast_replaceable_group = turret.fast_replaceable_group
+  if not fast_replaceable_group then
+    fast_replaceable_group = turret_name
+    turret.fast_replaceable_group = fast_replaceable_group
+  end
+
+  local new_turret = table.deepcopy(turret)
+  new_turret.name = new_turret_name
+  new_turret.localised_name = localised_name
+  new_turret.localised_description = localised_description
+  new_turret.icons = icons
+  new_turret.icon = nil
+  new_turret.icon_size = nil
+  new_turret.icon_mipmaps = nil
+  new_turret.placeable_by = nil
+  new_turret.minable = {
+    mining_time = 0,
+    result = new_turret_name
+  }
+
+  -- store the name of the original turret in next_upgrade so we can get at it in control.
+  new_turret.next_upgrade = turret_name
+
+  do
+    local new_turret_flags = new_turret.flags
+    for i = 1,#new_turret_flags do
+      local flag = new_turret_flags[i]
+      if flag == 'not-upgradable' then
+        new_turret_flags[i] = new_turret_flags[#new_turret_flags]
+        new_turret_flags[#new_turret_flags] = nil
+        goto found_flag
+      end
+    end
+    ::found_flag::
+  end
+
+  table.insert(new_things, new_turret)
+
+
+
   local new_item = {
     type = "item",
-    name = new_item_name,
+    name = new_turret_name,
     localised_name = localised_name,
     localised_description = localised_description,
     icons = icons,
     subgroup = subgroup_name,
     order = ammo.order,
-    place_result = turret_name,
+    place_result = new_turret_name,
     stack_size = 1
   }
   HighlyDerivative.mark_final(new_item)
@@ -265,7 +307,7 @@ local function derive_from_turret_and_ammo(
 
     local turret_result = {
       type = 'item',
-      name = new_item_name,
+      name = new_turret_name,
       amount = 1,
       catalyst_amount = 1
     }
@@ -286,7 +328,7 @@ local function derive_from_turret_and_ammo(
         }
       },
       results = { turret_result },
-      main_product = new_item_name,
+      main_product = new_turret_name,
       category = crafting_category
     }
     table.insert(new_things, new_recipe)
@@ -320,7 +362,7 @@ local function derive_from_turret_and_ammo(
           }
         },
         energy_required = 0.5 + ENERGY_PER_EMPTY * barrel_count,
-        main_product = new_item_name,
+        main_product = new_turret_name,
         category = crafting_category
       }
       table.insert(new_things, barrel_recipe)
@@ -616,12 +658,3 @@ HighlyDerivative.register_derivation('ammo-turret', derive_ammo_turret)
 HighlyDerivative.register_derivation('artillery-turret', derive_artillery_turet)
 HighlyDerivative.register_derivation('fluid', derive_fluid)
 HighlyDerivative.register_derivation('fluid-turret', derive_fluid_turret)
-
---[[
-
-TODO support for uniturret.
-
-The uniturret item creates a 2x2 chest with a single stack, which then gets replaced with the actual turret when filled with something.
-
-]]
-

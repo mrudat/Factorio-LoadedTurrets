@@ -1,4 +1,11 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.1.4
+Date: 2020-06-30
+
+  Changes:
+    - Create an entity for the loaded turrets, which allows the loaded turrets to be built by script or by robot. On the other hand, it also shows up in the building statistics that you have built a turret-with-uranium ammo, not just a turret.
+
+---------------------------------------------------------------------------------------------------
 Version: 0.1.3
 Date: 2020-06-20
 

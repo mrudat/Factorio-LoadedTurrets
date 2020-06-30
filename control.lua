@@ -10,10 +10,11 @@ local function autovivify(table, key)
   return foo
 end
 
-local ItemLookup
+local TurretLookup
 local EntitiesToWatch
 
-local function build_item_lookup()
+-- TODO only consider turrets that when placed can be be upgraded.
+local function build_turret_lookup()
   local ammo_ingredient_filter = {
     filter = "has-ingredient-item",
     mode = "and",
@@ -224,9 +225,14 @@ local function build_item_lookup()
       item_name_to_turret[turret_item_name] = turret
     end
 
+    local real_turret = turret.next_upgrade
+    if not real_turret then goto next_recipe end
+
+    local turret_name = turret.name
     local turret_type = turret.type
 
     if turret_type == 'ammo-turret' or turret_type == 'artillery-turret' then
+      -- there should be exactly two ingredients; the turret and the ammo
       local ingredients = recipe.ingredients
       local ammo_amount
       local ammo_name
@@ -284,13 +290,15 @@ local function build_item_lookup()
         ammo_per_turret = ammo_per_turret_ceil
       end
 
-      EntitiesToWatch[turret.name] = true
+      EntitiesToWatch[turret_name] = true
 
-      ItemLookup[turret_item_name] = {
+      TurretLookup[turret_name] = {
         name = ammo_name,
-        count = ammo_per_turret
+        count = ammo_per_turret,
+        real_turret_name = real_turret.name
       }
     elseif turret_type == 'fluid-turret' then
+      -- there should be exactly two ingredients; the turret and the ammo
       if not barrel_name_to_barrel_data then
         build_barrel_name_to_barrel_data()
       end
@@ -340,11 +348,12 @@ local function build_item_lookup()
 
       local fluid_per_turret = fluid_amount / created_turret_item_count
 
-      EntitiesToWatch[turret.name] = true
+      EntitiesToWatch[turret_name] = true
 
-      ItemLookup[turret_item_name] = {
+      TurretLookup[turret_name] = {
         name = ammo_fluid_name,
-        amount = fluid_per_turret
+        amount = fluid_per_turret,
+        real_turret_name = real_turret.name
       }
     end
 
@@ -354,35 +363,61 @@ end
 
 local defines_inventory_turret_ammo = defines.inventory.turret_ammo
 
-local function new_turret(event)
-  local entity = event.created_entity
-  local force = entity.force
+local function new_turret(fake_turret)
+--  local entity = event.created_entity
+  local force = fake_turret.force
 
-  local stack = event.stack
-  if not stack or not stack.valid or not stack.valid_for_read then
-    force.print({"LoadedTurrets.stack-not-valid"}, ERROR_COLOR)
-    return
+  local fake_turret_name = fake_turret.name
+
+  local turret_data = TurretLookup[fake_turret_name]
+  if not turret_data then return end
+
+  local real_turret_name = turret_data.real_turret_name
+
+  local surface = fake_turret.surface
+
+  local position = fake_turret.position
+  local direction = fake_turret.direction
+  local player = fake_turret.last_user
+
+  local real_turret = surface.create_entity{
+    name = real_turret_name,
+    position = position,
+    direction = direction,
+    force = force,
+    player = player,
+    -- fast_replace = false,
+    raise_built = true,
+    create_build_effect_smoke = false
+  }
+
+  if not real_turret then
+    error("Couldn't replace " .. fake_turret_name .. " with " .. real_turret_name .. "!")
   end
 
-  local item_name = stack.name
+  -- TODO don't count building fake_turret, instead count real_turret?
+  --[[
+  local flow_stats = force.entity_build_count_statistics
+  local buildings_constructed = flow_stats.input_counts
+  buildings_constructed[fake_turret_name] = (buildings_constructed[fake_turret_name] or 0) - 1
+  log(buildings_constructed[fake_turret_name])
+  flow_stats.on_flow(real_turret_name, 1)
+  ]]
 
-  local item_data = ItemLookup[item_name]
-  if not item_data then return end
-
-  local entity_type = entity.type
+  local entity_type = real_turret.type
   if entity_type == 'ammo-turret' or entity_type == 'artillery-turret' then
-    local item_count = item_data.count
-    local inventory = entity.get_inventory(defines_inventory_turret_ammo)
+    local item_count = turret_data.count
+    local inventory = real_turret.get_inventory(defines_inventory_turret_ammo)
     if inventory then
-      local inserted = inventory.insert(item_data)
+      local inserted = inventory.insert(turret_data)
       item_count = item_count - inserted
     end
     if item_count > 0 then -- shouldn't happen for one of ours, but someone else might get the numbers wrong.
       force.print({"LoadedTurrets.turret-full"}, WARNING_COLOR)
-      entity.surface.spill_item_stack(
-        entity.position,
+      surface.spill_item_stack(
+        position,
         {
-          name = item_data.name,
+          name = turret_data.name,
           count = item_count
         },
         nil,
@@ -390,17 +425,55 @@ local function new_turret(event)
         false
       )
     end
+    local old_inventory = fake_turret.get_inventory(defines_inventory_turret_ammo)
+    if old_inventory and not old_inventory.is_empty() then
+      old_inventory.sort_and_merge()
+      for i = 1,#old_inventory do
+        local old_stack = old_inventory[i]
+        for j = 1,#inventory do
+          local new_stack = inventory[j]
+          if new_stack.transfer_stack(old_stack) then
+            goto stack_empty
+          end
+        end
+        if old_stack.count > 0 then
+          surface.spill_item_stack(
+            position,
+            old_stack,
+            nil,
+            force,
+            false
+          )
+        end
+        ::stack_empty::
+      end
+    end
   elseif entity_type == 'fluid-turret' then
-    local amount_to_add = item_data.amount
-    local amount_added = entity.insert_fluid(item_data)
+    local amount_to_add = turret_data.amount
+    local amount_added = real_turret.insert_fluid(turret_data)
     if amount_added < amount_to_add then
       force.print({"LoadedTurrets.fluid-turret-full"}, ERROR_COLOR)
     end
+
   end
+  fake_turret.destroy()
+  return real_turret
+end
+
+local function turret_built(event)
+  event.created_entity = new_turret(event.created_entity)
+end
+
+local function turret_built_by_script(event)
+  event.entity = new_turret(event.entity)
+end
+
+local function turret_cloned(event)
+  event.destination = new_turret(event.destination)
 end
 
 local function on_load()
-  ItemLookup = global.ItemLookup
+  TurretLookup = global.ItemLookup
   EntitiesToWatch = global.EntitiesToWatch
 
   local entity_filter = {}
@@ -415,16 +488,19 @@ local function on_load()
   local defines_events = defines.events
 
   -- on_built_entity
-  script.on_event(defines_events.on_robot_built_entity, new_turret, entity_filter)
-  script.on_event(defines_events.on_built_entity, new_turret, entity_filter)
+  script.on_event(defines_events.on_robot_built_entity, turret_built, entity_filter)
+  script.on_event(defines_events.on_built_entity, turret_built, entity_filter)
+  script.on_event(defines_events.script_raised_built, turret_built_by_script, entity_filter)
+  script.on_event(defines_events.script_raised_revive, turret_built_by_script, entity_filter)
+  script.on_event(defines_events.on_entity_cloned, turret_cloned, entity_filter)
 end
 
 local function on_init()
   global.ItemLookup = {}
   global.EntitiesToWatch = {}
-  ItemLookup = global.ItemLookup
+  TurretLookup = global.ItemLookup
   EntitiesToWatch = global.EntitiesToWatch
-  build_item_lookup()
+  build_turret_lookup()
   on_load()
 end
 
